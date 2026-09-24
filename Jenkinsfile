@@ -1,14 +1,16 @@
+
 pipeline {
     agent any
 
     /*
      * ============================================================
      * SecureTask - Jenkinsfile
+     * Windows Jenkins compatible
      * ============================================================
-     * Required Jenkins credentials (configure in Manage Jenkins > Credentials):
-     *   DOCKER_HUB_CREDENTIALS  - Docker Hub username/password (id: docker-hub-creds)
-     *   SONAR_TOKEN             - SonarQube/SonarCloud token  (id: sonar-token)
-     *   SONAR_HOST_URL          - SonarQube server URL        (id: sonar-host-url, Secret text)
+     *
+     * Required Jenkins credentials:
+     *   docker-hub-creds - Docker Hub username/password
+     *   sonar-token      - SonarCloud/SonarQube token
      *
      * Required Jenkins plugins:
      *   - Pipeline
@@ -18,29 +20,28 @@ pipeline {
      *   - JUnit
      *   - HTML Publisher
      *
-     * Required Jenkins global tools (Manage Jenkins > Global Tool Configuration):
-     *   - NodeJS installation named: "NodeJS-20"
-     *   - SonarQube Scanner named:   "SonarScanner"
-     *   - Docker installation named: "docker" (or docker available on agent PATH)
+     * Required Jenkins configuration:
+     *   - Node.js available on PATH
+     *   - SonarQube server configured as "SonarQube"
+     *   - Docker Desktop installed and running
      *
-     * Environment-specific variables to set in Jenkins:
-     *   DOCKER_REGISTRY      - e.g. "docker.io/yourusername"
-     *   STAGING_SERVER       - SSH target for staging deploy, e.g. "user@staging-host"
-     *   STAGING_APP_DIR      - Remote directory, e.g. "/opt/securetask"
+     * Environment variables (optional):
+     *   DOCKER_REGISTRY
+     *   STAGING_SERVER
+     *   STAGING_APP_DIR
+     *   STAGING_HOST
+     *
      * ============================================================
      */
 
     environment {
-        APP_NAME       = 'securetask'
-        IMAGE_BACKEND  = "${env.DOCKER_REGISTRY ?: 'registry.local'}/${APP_NAME}-backend"
+        APP_NAME = 'securetask'
+        IMAGE_BACKEND = "${env.DOCKER_REGISTRY ?: 'registry.local'}/${APP_NAME}-backend"
         IMAGE_FRONTEND = "${env.DOCKER_REGISTRY ?: 'registry.local'}/${APP_NAME}-frontend"
-        NODE_ENV       = 'test'
+        NODE_ENV = 'test'
     }
 
-    
-
     options {
-        
         disableConcurrentBuilds()
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
@@ -48,42 +49,50 @@ pipeline {
 
     stages {
 
-        // ─────────────────────────────────────────────
+        // ========================================================
         // STAGE 1: BUILD
-        // ─────────────────────────────────────────────
+        // ========================================================
+
         stage('Build') {
             parallel {
                 stage('Backend Install') {
                     steps {
                         dir('backend') {
-                            sh 'npm ci'
+                            bat 'npm ci'
                         }
                     }
                 }
+
                 stage('Frontend Install & Build') {
                     steps {
                         dir('frontend') {
-                            sh 'npm ci'
-                            sh 'npm run build'
+                            bat 'npm ci'
+                            bat 'npm run build'
                         }
                     }
                 }
             }
         }
 
-        // ─────────────────────────────────────────────
+        // ========================================================
         // STAGE 2: TEST
-        // ─────────────────────────────────────────────
+        // ========================================================
+
         stage('Test') {
             steps {
                 dir('backend') {
-                    sh 'npm test -- --ci --reporters=default --reporters=jest-junit 2>&1 || true'
-                    sh 'npm run test:coverage -- --ci 2>&1'
+                    bat 'npm test -- --ci --reporters=default --reporters=jest-junit'
+                    bat 'npm run test:coverage -- --ci'
                 }
             }
+
             post {
                 always {
-                    junit allowEmptyResults: true, testResults: 'backend/junit.xml'
+                    junit(
+                        allowEmptyResults: true,
+                        testResults: 'backend/junit.xml'
+                    )
+
                     publishHTML([
                         allowMissing: true,
                         alwaysLinkToLastBuild: true,
@@ -96,76 +105,114 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────────
+        // ========================================================
         // STAGE 3: CODE QUALITY
-        // ─────────────────────────────────────────────
+        // ========================================================
+
         stage('Code Quality') {
             parallel {
                 stage('ESLint Backend') {
                     steps {
                         dir('backend') {
-                            sh 'npm run lint 2>&1'
+                            bat 'npm run lint'
                         }
                     }
                 }
+
                 stage('ESLint Frontend') {
                     steps {
                         dir('frontend') {
-                            sh 'npm run lint 2>&1'
+                            bat 'npm run lint'
                         }
                     }
                 }
+
                 stage('SonarQube Analysis') {
                     steps {
                         withSonarQubeEnv('SonarQube') {
-                            sh """
-                                sonar-scanner \
-                                  -Dsonar.projectKey=${APP_NAME} \
-                                  -Dsonar.sources=backend/src,frontend/src \
-                                  -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/** \
+                            bat '''
+                                sonar-scanner ^
+                                  -Dsonar.projectKey=securetask ^
+                                  -Dsonar.sources=backend/src,frontend/src ^
+                                  -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/** ^
                                   -Dsonar.javascript.lcov.reportPaths=backend/coverage/lcov.info
-                            """
+                            '''
                         }
                     }
                 }
             }
         }
 
-        // ─────────────────────────────────────────────
+        // ========================================================
         // STAGE 4: SECURITY
-        // ─────────────────────────────────────────────
+        // ========================================================
+
         stage('Security') {
             parallel {
                 stage('npm audit backend') {
                     steps {
                         dir('backend') {
-                            sh 'npm audit --audit-level=high 2>&1 || echo "Audit warnings found - review output"'
+                            bat '''
+                                @echo Running backend dependency audit...
+                                call npm audit --audit-level=high
+                                if errorlevel 1 (
+                                    echo WARNING: Backend audit reported vulnerabilities.
+                                    echo Review the audit output and remediate findings.
+                                )
+                                exit /b 0
+                            '''
                         }
                     }
                 }
+
                 stage('npm audit frontend') {
                     steps {
                         dir('frontend') {
-                            sh 'npm audit --audit-level=high 2>&1 || echo "Audit warnings found - review output"'
+                            bat '''
+                                @echo Running frontend dependency audit...
+                                call npm audit --audit-level=high
+                                if errorlevel 1 (
+                                    echo WARNING: Frontend audit reported vulnerabilities.
+                                    echo Review the audit output and remediate findings.
+                                )
+                                exit /b 0
+                            '''
                         }
                     }
                 }
             }
         }
 
-        // ─────────────────────────────────────────────
+        // ========================================================
         // STAGE 5: DOCKER BUILD & PUSH
-        // ─────────────────────────────────────────────
+        // ========================================================
+
         stage('Docker Build & Push') {
-            when { branch 'main' }
+            when {
+                branch 'main'
+            }
+
             steps {
                 script {
                     def tag = env.BUILD_NUMBER
-                    docker.withRegistry('https://index.docker.io/v1/', 'docker-hub-creds') {
-                        def backendImg  = docker.build("${IMAGE_BACKEND}:${tag}",  '-f backend/Dockerfile backend/')
-                        def frontendImg = docker.build("${IMAGE_FRONTEND}:${tag}", '-f frontend/Dockerfile frontend/')
+
+                    docker.withRegistry(
+                        'https://index.docker.io/v1/',
+                        'docker-hub-creds'
+                    ) {
+                        def backendImg = docker.build(
+                            "${IMAGE_BACKEND}:${tag}",
+                            '-f backend/Dockerfile backend/'
+                        )
+
+                        def frontendImg = docker.build(
+                            "${IMAGE_FRONTEND}:${tag}",
+                            '-f frontend/Dockerfile frontend/'
+                        )
+
                         backendImg.push()
                         backendImg.push('latest')
+
                         frontendImg.push()
                         frontendImg.push('latest')
                     }
@@ -173,75 +220,116 @@ pipeline {
             }
         }
 
-        // ─────────────────────────────────────────────
-        // STAGE 6: DEPLOY (Staging)
-        // ─────────────────────────────────────────────
+        // ========================================================
+        // STAGE 6: DEPLOY TO STAGING
+        // ========================================================
+
         stage('Deploy') {
-            when { branch 'main' }
+            when {
+                branch 'main'
+            }
+
             steps {
                 script {
-                    // Requires SSH key credential 'staging-ssh-key' and env vars
-                    // STAGING_SERVER and STAGING_APP_DIR set in Jenkins
-                    sh """
-                        echo "Deploying build #${env.BUILD_NUMBER} to staging..."
-                        # ssh -o StrictHostKeyChecking=no ${env.STAGING_SERVER} '
-                        #   cd ${env.STAGING_APP_DIR} &&
-                        #   docker compose pull &&
-                        #   docker compose up -d --remove-orphans
-                        # '
-                        echo "Deploy step ready - configure STAGING_SERVER to activate"
-                    """
+                    echo "Deploying build #${env.BUILD_NUMBER} to staging..."
+
+                    if (env.STAGING_SERVER?.trim() &&
+                        env.STAGING_APP_DIR?.trim()) {
+
+                        echo "Staging deployment configuration detected."
+
+                        /*
+                         * Actual remote deployment requires:
+                         * - SSH Agent plugin
+                         * - staging-ssh-key credential
+                         * - SSH client available on Jenkins PATH
+                         * - Docker Compose on the staging server
+                         *
+                         * Configure these before activating remote SSH.
+                         */
+
+                        echo "Remote SSH deployment is not activated yet."
+                        echo "Configure staging SSH credentials to enable it."
+
+                    } else {
+                        echo "Staging deployment is pending configuration."
+                        echo "Set STAGING_SERVER and STAGING_APP_DIR in Jenkins."
+                    }
                 }
             }
         }
 
-        // ─────────────────────────────────────────────
+        // ========================================================
         // STAGE 7: RELEASE
-        // ─────────────────────────────────────────────
+        // ========================================================
+
         stage('Release') {
             when {
                 allOf {
                     branch 'main'
-                    tag pattern: 'v\\d+\\.\\d+\\.\\d+', comparator: 'REGEXP'
+                    tag pattern: 'v\\d+\\.\\d+\\.\\d+',
+                        comparator: 'REGEXP'
                 }
             }
+
             steps {
                 script {
-                    def releaseTag = env.TAG_NAME ?: "v1.0.${env.BUILD_NUMBER}"
+                    def releaseTag =
+                        env.TAG_NAME ?: "v1.0.${env.BUILD_NUMBER}"
+
                     echo "Releasing version ${releaseTag}"
-                    // Tag Docker images with release version
-                    // docker.withRegistry('https://index.docker.io/v1/', 'docker-hub-creds') {
-                    //   sh "docker tag ${IMAGE_BACKEND}:${env.BUILD_NUMBER} ${IMAGE_BACKEND}:${releaseTag}"
-                    //   sh "docker push ${IMAGE_BACKEND}:${releaseTag}"
-                    // }
+
+                    /*
+                     * Docker release tagging and pushing can be
+                     * enabled after registry configuration.
+                     */
+
+                    echo "Release version identified: ${releaseTag}"
                 }
             }
         }
 
-        // ─────────────────────────────────────────────
-        // STAGE 8: MONITORING CHECK
-        // ─────────────────────────────────────────────
+        // ========================================================
+        // STAGE 8: MONITORING
+        // ========================================================
+
         stage('Monitoring') {
-            when { branch 'main' }
+            when {
+                branch 'main'
+            }
+
             steps {
-                sh """
-                    echo "Checking health endpoint..."
-                    # curl -f http://\${STAGING_HOST:-localhost}:5000/api/health || echo "Health check pending - service may be starting"
-                    # curl -f http://\${STAGING_HOST:-localhost}:5000/api/health/db || echo "DB health check pending"
-                    echo "Health endpoints available at /api/health and /api/health/db"
-                    echo "Metrics endpoint available at /api/metrics"
-                """
+                script {
+                    def host = env.STAGING_HOST?.trim() ?: 'localhost'
+
+                    echo "Checking SecureTask health endpoints..."
+
+                    bat """
+                        @echo Checking application health endpoint...
+                        curl.exe -f http://${host}:5000/api/health
+                    """
+
+                    echo "Health endpoint checked."
+                    echo "Database health endpoint: /api/health/db"
+                    echo "Metrics endpoint: /api/metrics"
+                }
             }
         }
     }
 
+    // ============================================================
+    // POST-BUILD ACTIONS
+    // ============================================================
+
     post {
         always {
-            cleanWs()
+            deleteDir()
         }
+
         success {
             echo "Pipeline succeeded for build #${env.BUILD_NUMBER}"
         }
+
         failure {
             echo "Pipeline FAILED for build #${env.BUILD_NUMBER} - review logs above"
         }
