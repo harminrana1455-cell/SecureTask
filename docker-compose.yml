@@ -1,0 +1,72 @@
+﻿services:
+  mongo:
+    image: mongo:7-jammy
+    container_name: securetask-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: securetask
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - securetask-net
+    healthcheck:
+      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: securetask-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      MONGODB_URI: mongodb://mongo:27017/securetask
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8081}
+    ports:
+      - "5000:5000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - securetask-net
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://localhost:5000/api/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: securetask-frontend
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - securetask-net
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://localhost/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  mongo_data:
+
+networks:
+  securetask-net:
+    driver: bridge
