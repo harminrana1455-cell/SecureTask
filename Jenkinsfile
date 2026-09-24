@@ -79,9 +79,13 @@ pipeline {
         // ========================================================
 
         stage('Test') {
+            environment {
+                JWT_SECRET = 'securetask-ci-test-secret-only'
+            }
+
             steps {
                 dir('backend') {
-                    bat 'npm test -- --ci --reporters=default --reporters=jest-junit'
+                    bat 'npm test -- --ci --coverage --reporters=default --reporters=jest-junit'
                     bat 'npm run test:coverage -- --ci'
                 }
             }
