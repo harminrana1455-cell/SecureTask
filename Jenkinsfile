@@ -133,7 +133,7 @@ pipeline {
 
                 stage('SonarQube Analysis') {
                     steps {
-                        withSonarQubeEnv('SonarQube') {
+                        withSonarQubeEnv('SonarCloud') {
                             bat '''
                                 sonar-scanner ^
                                   -Dsonar.projectKey=securetask ^
