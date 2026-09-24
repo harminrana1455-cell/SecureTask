@@ -37,9 +37,7 @@ pipeline {
         NODE_ENV       = 'test'
     }
 
-    tools {
-        nodejs 'NodeJS-20'
-    }
+    
 
     options {
         
