@@ -10,7 +10,7 @@ pipeline {
      *
      * Required Jenkins credentials:
      *   docker-hub-creds - Docker Hub username/password
-     *   sonar-token      - SonarCloud/SonarQube token
+     *   SonarCloud Token - SonarCloud analysis token
      *
      * Required Jenkins plugins:
      *   - Pipeline
@@ -22,14 +22,9 @@ pipeline {
      *
      * Required Jenkins configuration:
      *   - Node.js available on PATH
-     *   - SonarQube server configured as "SonarQube"
+     *   - SonarQube server configured as "SonarCloud"
+     *   - SonarQube Scanner tool configured as "SonarScanner"
      *   - Docker Desktop installed and running
-     *
-     * Environment variables (optional):
-     *   DOCKER_REGISTRY
-     *   STAGING_SERVER
-     *   STAGING_APP_DIR
-     *   STAGING_HOST
      *
      * ============================================================
      */
@@ -133,14 +128,18 @@ pipeline {
 
                 stage('SonarQube Analysis') {
                     steps {
-                        withSonarQubeEnv('SonarCloud') {
-                            bat '''
-                                sonar-scanner ^
-                                  -Dsonar.projectKey=securetask ^
-                                  -Dsonar.sources=backend/src,frontend/src ^
-                                  -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/** ^
-                                  -Dsonar.javascript.lcov.reportPaths=backend/coverage/lcov.info
-                            '''
+                        script {
+                            def scannerHome = tool 'SonarScanner'
+
+                            withSonarQubeEnv('SonarCloud') {
+                                bat """
+                                    "${scannerHome}\\bin\\sonar-scanner.bat" ^
+                                    -Dsonar.projectKey=harminrana1455-cell_SecureTask ^
+                                    -Dsonar.sources=backend/src,frontend/src ^
+                                    -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/** ^
+                                    -Dsonar.javascript.lcov.reportPaths=backend/coverage/lcov.info
+                                """
+                            }
                         }
                     }
                 }

@@ -1,2 +1,2 @@
-process.env.JWT_SECRET = 'securetask-ci-test-secret-only';
+process.env.JWT_SECRET = 'cbe93dfa4e5e81a4e5e7b4c096cd6cd084d2c136ec2229511bf5489a9313c3de1b49a9df2b6b6cb53d6962fd8013f743dbccc0ed7bdc53e3d5b51308b9e4e790';
 process.env.JWT_EXPIRES_IN = '7d';
