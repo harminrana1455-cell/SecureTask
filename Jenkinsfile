@@ -276,17 +276,57 @@ pipeline {
 
         // STAGE 7: RELEASE
 
-        stage('Release') {
-            steps {
-                script {
-                    def releaseTag =
-                        env.TAG_NAME ?: "v1.0.${env.BUILD_NUMBER}"
+stage('Release') {
+    steps {
+        script {
+            def releaseTag = env.TAG_NAME ?: "v1.0.${env.BUILD_NUMBER}"
 
-                    echo "Release version identified: ${releaseTag}"
-                    echo 'Release stage completed.'
+            withCredentials([
+                string(
+                    credentialsId: 'github-release-token',
+                    variable: 'GITHUB_TOKEN'
+                )
+            ]) {
+                withEnv(["RELEASE_TAG=${releaseTag}"]) {
+                    powershell '''
+                        $headers = @{
+                            Authorization = "Bearer $env:GITHUB_TOKEN"
+                            Accept = "application/vnd.github+json"
+                            "X-GitHub-Api-Version" = "2022-11-28"
+                        }
+
+                        $body = @{
+                            tag_name = $env:RELEASE_TAG
+                            name = "SecureTask $env:RELEASE_TAG"
+                            body = "Automated release of SecureTask from Jenkins build #$env:BUILD_NUMBER."
+                            draft = $false
+                            prerelease = $false
+                        } | ConvertTo-Json
+
+                        $uri = "https://api.github.com/repos/harminrana1455-cell/SecureTask/releases"
+
+                        try {
+                            $response = Invoke-RestMethod `
+                                -Uri $uri `
+                                -Method Post `
+                                -Headers $headers `
+                                -Body $body `
+                                -ContentType "application/json"
+
+                            Write-Host "GitHub Release created successfully."
+                            Write-Host "Release tag: $($response.tag_name)"
+                            Write-Host "Release URL: $($response.html_url)"
+                        }
+                        catch {
+                            Write-Error "GitHub Release creation failed: $($_.Exception.Message)"
+                            exit 1
+                        }
+                    '''
                 }
             }
         }
+    }
+}
 
         // STAGE 8: MONITORING
 
