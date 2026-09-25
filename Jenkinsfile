@@ -257,7 +257,7 @@ pipeline {
                             if errorlevel 1 exit /b 1
 
                             @echo Waiting for containers to initialize...
-                            timeout /t 15 /nobreak > nul
+                            powershell -NoProfile -Command "Start-Sleep -Seconds 15"
 
                             @echo Checking backend health...
                             curl.exe -fsS http://localhost:5000/api/health
