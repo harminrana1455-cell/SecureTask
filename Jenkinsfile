@@ -233,23 +233,42 @@ pipeline {
             }
         }
 
+        
         // STAGE 6: DEPLOY TO STAGING
 
         stage('Deploy') {
             steps {
                 script {
-                    echo "Deploying build #${env.BUILD_NUMBER} to staging..."
+                    echo "Deploying SecureTask build #${env.BUILD_NUMBER}..."
 
-                    if (env.STAGING_SERVER?.trim() &&
-                        env.STAGING_APP_DIR?.trim()) {
+                    withCredentials([
+                        string(
+                            credentialsId: 'securetask-jwt-secret',
+                            variable: 'JWT_SECRET'
+                        )
+                    ]) {
+                        bat '''
+                            @echo Pulling latest SecureTask images...
+                            docker compose -p securetask pull backend frontend
+                            if errorlevel 1 exit /b 1
 
-                        echo 'Staging deployment configuration detected.'
-                        echo 'Remote SSH deployment is not activated yet.'
-                        echo 'Configure staging SSH credentials to enable it.'
+                            @echo Deploying SecureTask...
+                            docker compose -p securetask up -d --no-build
+                            if errorlevel 1 exit /b 1
 
-                    } else {
-                        echo 'Staging deployment is pending configuration.'
-                        echo 'Set STAGING_SERVER and STAGING_APP_DIR in Jenkins.'
+                            @echo Waiting for containers to initialize...
+                            timeout /t 15 /nobreak > nul
+
+                            @echo Checking backend health...
+                            curl.exe -fsS http://localhost:5000/api/health
+                            if errorlevel 1 exit /b 1
+
+                            @echo Checking frontend availability...
+                            curl.exe -fsS -I http://localhost:8081
+                            if errorlevel 1 exit /b 1
+
+                            @echo Deployment and health checks completed.
+                        '''
                     }
                 }
             }
