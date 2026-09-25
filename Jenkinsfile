@@ -137,6 +137,7 @@ pipeline {
                                     -Dsonar.sources=backend/src,frontend/src ^
                                     -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/** ^
                                     -Dsonar.javascript.lcov.reportPaths=backend/coverage/lcov.info
+				    -Dsonar.testExecutionReportPaths=
                                 """
                             }
                         }
