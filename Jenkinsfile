@@ -3,36 +3,23 @@ pipeline {
     agent any
 
     /*
-     * ============================================================
      * SecureTask - Jenkinsfile
      * Windows Jenkins compatible
-     * ============================================================
      *
      * Required Jenkins credentials:
      *   docker-hub-creds - Docker Hub username/password
-     *   SonarCloud Token - SonarCloud analysis token
-     *
-     * Required Jenkins plugins:
-     *   - Pipeline
-     *   - Docker Pipeline
-     *   - SonarQube Scanner
-     *   - NodeJS
-     *   - JUnit
-     *   - HTML Publisher
      *
      * Required Jenkins configuration:
-     *   - Node.js available on PATH
-     *   - SonarQube server configured as "SonarCloud"
-     *   - SonarQube Scanner tool configured as "SonarScanner"
-     *   - Docker Desktop installed and running
-     *
-     * ============================================================
+     *   SonarQube server: SonarCloud
+     *   SonarQube Scanner tool: SonarScanner
+     *   Docker Desktop installed and running
      */
 
     environment {
         APP_NAME = 'securetask'
-        IMAGE_BACKEND = "${env.DOCKER_REGISTRY ?: 'registry.local'}/${APP_NAME}-backend"
-        IMAGE_FRONTEND = "${env.DOCKER_REGISTRY ?: 'registry.local'}/${APP_NAME}-frontend"
+        DOCKER_REGISTRY = 'docker.io/harmin014'
+        IMAGE_BACKEND = "${DOCKER_REGISTRY}/${APP_NAME}-backend"
+        IMAGE_FRONTEND = "${DOCKER_REGISTRY}/${APP_NAME}-frontend"
         NODE_ENV = 'test'
     }
 
@@ -44,9 +31,7 @@ pipeline {
 
     stages {
 
-        // ========================================================
         // STAGE 1: BUILD
-        // ========================================================
 
         stage('Build') {
             parallel {
@@ -69,9 +54,7 @@ pipeline {
             }
         }
 
-        // ========================================================
         // STAGE 2: TEST
-        // ========================================================
 
         stage('Test') {
             environment {
@@ -79,10 +62,10 @@ pipeline {
             }
 
             steps {
-    dir('backend') {
-        bat 'npm test -- --ci --coverage --reporters=default --reporters=jest-junit'
-    }
-}
+                dir('backend') {
+                    bat 'npm test -- --ci --coverage --reporters=default --reporters=jest-junit'
+                }
+            }
 
             post {
                 always {
@@ -103,9 +86,7 @@ pipeline {
             }
         }
 
-        // ========================================================
         // STAGE 3: CODE QUALITY
-        // ========================================================
 
         stage('Code Quality') {
             parallel {
@@ -137,7 +118,6 @@ pipeline {
                                     -Dsonar.sources=backend/src,frontend/src ^
                                     -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/** ^
                                     -Dsonar.javascript.lcov.reportPaths=backend/coverage/lcov.info
-				    -Dsonar.testExecutionReportPaths=
                                 """
                             }
                         }
@@ -146,9 +126,7 @@ pipeline {
             }
         }
 
-        // ========================================================
         // STAGE 4: SECURITY
-        // ========================================================
 
         stage('Security') {
             parallel {
@@ -186,52 +164,78 @@ pipeline {
             }
         }
 
-        // ========================================================
         // STAGE 5: DOCKER BUILD & PUSH
-        // ========================================================
 
         stage('Docker Build & Push') {
-            when {
-                branch 'main'
-            }
-
             steps {
                 script {
                     def tag = env.BUILD_NUMBER
 
-                    docker.withRegistry(
-                        'https://index.docker.io/v1/',
-                        'docker-hub-creds'
-                    ) {
-                        def backendImg = docker.build(
-                            "${IMAGE_BACKEND}:${tag}",
-                            '-f backend/Dockerfile backend/'
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'docker-hub-creds',
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_TOKEN'
                         )
+                    ]) {
+                        bat '''
+                            @echo Logging in to Docker Hub...
+                            powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:DOCKER_TOKEN | docker login -u $env:DOCKER_USER --password-stdin"
+                            if errorlevel 1 exit /b 1
+                        '''
 
-                        def frontendImg = docker.build(
-                            "${IMAGE_FRONTEND}:${tag}",
-                            '-f frontend/Dockerfile frontend/'
-                        )
+                        try {
+                            echo "Building backend image: ${IMAGE_BACKEND}:${tag}"
 
-                        backendImg.push()
-                        backendImg.push('latest')
+                            bat """
+                                docker build ^
+                                -t ${IMAGE_BACKEND}:${tag} ^
+                                -t ${IMAGE_BACKEND}:latest ^
+                                -f backend\\Dockerfile backend
+                            """
 
-                        frontendImg.push()
-                        frontendImg.push('latest')
+                            echo "Building frontend image: ${IMAGE_FRONTEND}:${tag}"
+
+                            bat """
+                                docker build ^
+                                -t ${IMAGE_FRONTEND}:${tag} ^
+                                -t ${IMAGE_FRONTEND}:latest ^
+                                -f frontend\\Dockerfile frontend
+                            """
+
+                            echo 'Pushing backend images to Docker Hub...'
+
+                            bat """
+                                docker push ${IMAGE_BACKEND}:${tag}
+                                if errorlevel 1 exit /b 1
+
+                                docker push ${IMAGE_BACKEND}:latest
+                                if errorlevel 1 exit /b 1
+                            """
+
+                            echo 'Pushing frontend images to Docker Hub...'
+
+                            bat """
+                                docker push ${IMAGE_FRONTEND}:${tag}
+                                if errorlevel 1 exit /b 1
+
+                                docker push ${IMAGE_FRONTEND}:latest
+                                if errorlevel 1 exit /b 1
+                            """
+
+                            echo 'Both SecureTask images were pushed successfully.'
+
+                        } finally {
+                            bat 'docker logout'
+                        }
                     }
                 }
             }
         }
 
-        // ========================================================
         // STAGE 6: DEPLOY TO STAGING
-        // ========================================================
 
         stage('Deploy') {
-            when {
-                branch 'main'
-            }
-
             steps {
                 script {
                     echo "Deploying build #${env.BUILD_NUMBER} to staging..."
@@ -239,90 +243,56 @@ pipeline {
                     if (env.STAGING_SERVER?.trim() &&
                         env.STAGING_APP_DIR?.trim()) {
 
-                        echo "Staging deployment configuration detected."
-
-                        /*
-                         * Actual remote deployment requires:
-                         * - SSH Agent plugin
-                         * - staging-ssh-key credential
-                         * - SSH client available on Jenkins PATH
-                         * - Docker Compose on the staging server
-                         *
-                         * Configure these before activating remote SSH.
-                         */
-
-                        echo "Remote SSH deployment is not activated yet."
-                        echo "Configure staging SSH credentials to enable it."
+                        echo 'Staging deployment configuration detected.'
+                        echo 'Remote SSH deployment is not activated yet.'
+                        echo 'Configure staging SSH credentials to enable it.'
 
                     } else {
-                        echo "Staging deployment is pending configuration."
-                        echo "Set STAGING_SERVER and STAGING_APP_DIR in Jenkins."
+                        echo 'Staging deployment is pending configuration.'
+                        echo 'Set STAGING_SERVER and STAGING_APP_DIR in Jenkins.'
                     }
                 }
             }
         }
 
-        // ========================================================
         // STAGE 7: RELEASE
-        // ========================================================
 
         stage('Release') {
-            when {
-                allOf {
-                    branch 'main'
-                    tag pattern: 'v\\d+\\.\\d+\\.\\d+',
-                        comparator: 'REGEXP'
-                }
-            }
-
             steps {
                 script {
                     def releaseTag =
                         env.TAG_NAME ?: "v1.0.${env.BUILD_NUMBER}"
 
-                    echo "Releasing version ${releaseTag}"
-
-                    /*
-                     * Docker release tagging and pushing can be
-                     * enabled after registry configuration.
-                     */
-
                     echo "Release version identified: ${releaseTag}"
+                    echo 'Release stage completed.'
                 }
             }
         }
 
-        // ========================================================
         // STAGE 8: MONITORING
-        // ========================================================
 
         stage('Monitoring') {
-            when {
-                branch 'main'
-            }
-
             steps {
                 script {
                     def host = env.STAGING_HOST?.trim() ?: 'localhost'
 
-                    echo "Checking SecureTask health endpoints..."
+                    echo 'Checking SecureTask health endpoint...'
 
                     bat """
                         @echo Checking application health endpoint...
                         curl.exe -f http://${host}:5000/api/health
+                        if errorlevel 1 exit /b 1
                     """
 
-                    echo "Health endpoint checked."
-                    echo "Database health endpoint: /api/health/db"
-                    echo "Metrics endpoint: /api/metrics"
+                    echo 'Health endpoint checked.'
+                    echo 'Database health endpoint: /api/health/db'
+                    echo 'Metrics endpoint: /api/metrics'
                 }
             }
         }
     }
 
-    // ============================================================
     // POST-BUILD ACTIONS
-    // ============================================================
 
     post {
         always {
