@@ -271,25 +271,33 @@ pipeline {
 
         // STAGE 8: MONITORING
 
-        stage('Monitoring') {
-            steps {
-                script {
-                    def host = env.STAGING_HOST?.trim() ?: 'localhost'
+        // STAGE 8: MONITORING
 
-                    echo 'Checking SecureTask health endpoint...'
+stage('Monitoring') {
+    steps {
+        script {
+            def host = env.STAGING_HOST?.trim() ?: 'localhost'
 
-                    bat """
-                        @echo Checking application health endpoint...
-                        curl.exe -f http://${host}:5000/api/health
-                        if errorlevel 1 exit /b 1
-                    """
+            echo 'Checking SecureTask application health...'
 
-                    echo 'Health endpoint checked.'
-                    echo 'Database health endpoint: /api/health/db'
-                    echo 'Metrics endpoint: /api/metrics'
-                }
-            }
+            bat """
+                @echo Checking API health...
+                curl.exe -fsS http://${host}:5000/api/health
+                if errorlevel 1 exit /b 1
+
+                @echo Checking database health...
+                curl.exe -fsS http://${host}:5000/api/health/db
+                if errorlevel 1 exit /b 1
+
+                @echo Checking application metrics...
+                curl.exe -fsS http://${host}:5000/api/metrics
+                if errorlevel 1 exit /b 1
+            """
+
+            echo 'All three monitoring endpoints returned successful HTTP responses.'
         }
+    }
+}
     }
 
     // POST-BUILD ACTIONS
