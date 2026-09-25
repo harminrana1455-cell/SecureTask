@@ -79,11 +79,10 @@ pipeline {
             }
 
             steps {
-                dir('backend') {
-                    bat 'npm test -- --ci --coverage --reporters=default --reporters=jest-junit'
-                    bat 'npm run test:coverage -- --ci'
-                }
-            }
+    dir('backend') {
+        bat 'npm test -- --ci --coverage --reporters=default --reporters=jest-junit'
+    }
+}
 
             post {
                 always {
